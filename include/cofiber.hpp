@@ -8,7 +8,7 @@
 #include <vector>
 
 #define COFIBER_ROUTINE(type, name_args, capture, code) \
-	auto name_args { \
+	type name_args { \
 		using _cofiber_type = type; \
 		return ::_cofiber_private::do_routine<_cofiber_type>(capture () { \
 			code \
