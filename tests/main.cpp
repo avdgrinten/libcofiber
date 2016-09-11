@@ -3,12 +3,9 @@
 
 #include <cofiber.hpp>
 
-auto test() {
-	return cofiber_routine<cofiber::no_future>([=] () {
-		printf("Hello world\n");
-		throw _cofiber_private::destroy_exception();
-	});
-}
+COFIBER_ROUTINE(cofiber::no_future, test(), [], {
+	printf("Hello world\n");
+})
 
 int main() {
 	printf("Before coroutine\n");

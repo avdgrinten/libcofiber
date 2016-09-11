@@ -7,6 +7,23 @@
 #include <new>
 #include <vector>
 
+#define COFIBER_ROUTINE(type, name_args, capture, code) \
+	auto name_args { \
+		using _cofiber_type = type; \
+		return ::_cofiber_private::do_routine<_cofiber_type>(capture () { \
+			code \
+		}); \
+	}
+
+#define COFIBER_AWAIT \
+	::_cofiber_private::await_expr<_cofiber_type>() |
+
+#define COFIBER_RETURN(value) \
+	do { \
+		::_cofiber_private::do_return<_cofiber_type>(value); \
+		return; \
+	} while(0)
+
 template<typename T,
 		typename = decltype(std::declval<T>().await_ready())>
 T &&cofiber_awaiter(T &&awaiter) {
@@ -57,8 +74,11 @@ namespace _cofiber_private {
 
 namespace cofiber {
 	template<typename P = void>
-	struct coroutine_handle {
-		coroutine_handle from_address(void *address) {
+	struct coroutine_handle;
+	
+	template<>
+	struct coroutine_handle<void> {
+		static coroutine_handle from_address(void *address) {
 			auto state = static_cast<_cofiber_private::state_struct *>(address);
 			return coroutine_handle(state);
 		}
@@ -77,18 +97,42 @@ namespace cofiber {
 			return _state != nullptr;
 		}
 
-		void resume() {
-			_cofiber_private::restore([&] (void *caller_sp) {
+		void resume() const {
+			_cofiber_private::restore([this] (void *caller_sp) {
 				_cofiber_private::stack.push_back({ _state, caller_sp });
 			}, _state->suspended_sp);
 		}
 
-		void destroy() {
-			assert(!"Destory was called");
+		void destroy() const {
+			_cofiber_private::restore([this] (void *caller_sp) {
+				_cofiber_private::stack.push_back({ _state, caller_sp });
+
+				throw _cofiber_private::destroy_exception();
+			}, _state->suspended_sp);
 		}
 
-	private:
+	protected:
 		_cofiber_private::state_struct *_state;
+	};
+
+	template<typename P>
+	struct coroutine_handle : public coroutine_handle<> {
+		static coroutine_handle from_promise(P &p) {
+			auto ptr = (char *)&p + sizeof(P);
+			assert(uintptr_t(ptr) % alignof(_cofiber_private::state_struct) == 0);
+			return coroutine_handle(reinterpret_cast<_cofiber_private::state_struct *>(ptr));
+		}
+
+		coroutine_handle() = default;
+
+		coroutine_handle(_cofiber_private::state_struct *state)
+		: coroutine_handle<>(state) { }
+
+		P &promise() {
+			auto ptr = (char *)_state - sizeof(P);
+			assert(uintptr_t(ptr) % alignof(P) == 0);
+			return *reinterpret_cast<P *>(ptr);
+		}
 	};
 
 	template<typename T>
@@ -120,60 +164,74 @@ namespace cofiber {
 	};
 } // namespace cofiber
 
-template<typename T>
-decltype(cofiber_awaiter(std::declval<T &&>()).await_resume()) cofiber_await(T &&expression) {
-	auto awaiter = cofiber_awaiter(std::forward<T>(expression));
+namespace _cofiber_private {
+	template<typename X>
+	struct await_expr { };
 
-	if(!awaiter.await_ready()) {
-		_cofiber_private::restore([&] (void *coroutine_sp) {
-			auto state = _cofiber_private::stack.back().state;
-			_cofiber_private::stack.pop_back();
+	template<typename X, typename T>
+	decltype(cofiber_awaiter(std::declval<T>()).await_resume()) operator| (await_expr<X>, T &&expression) {
+		using P = typename cofiber::coroutine_traits<X>::promise_type;
 
-			state->suspended_sp = coroutine_sp;
+		auto awaiter = cofiber_awaiter(std::forward<T>(expression));
 
-			awaiter.await_suspend(cofiber::coroutine_handle<>(state));
-		}, _cofiber_private::stack.back().caller_sp);
-	}
+		if(!awaiter.await_ready()) {
+			_cofiber_private::restore([&awaiter] (void *coroutine_sp) {
+				auto state = _cofiber_private::stack.back().state;
+				_cofiber_private::stack.pop_back();
 
-	return awaiter.await_resume();
-}
+				state->suspended_sp = coroutine_sp;
 
-template<typename X, typename F>
-X cofiber_routine(F functor) {
-	using P = typename cofiber::coroutine_traits<X>::promise_type;
-
-	size_t stack_size = 0x100000;
-	char *sp = (char *)(operator new(stack_size)) + stack_size;
-	
-	// allocate both the coroutine state and the promise on the fiber stack
-	sp -= sizeof(_cofiber_private::state_struct);
-	assert(uintptr_t(sp) % alignof(_cofiber_private::state_struct) == 0);
-	auto state = new (sp) _cofiber_private::state_struct;
-
-	sp -= sizeof(P);
-	assert(uintptr_t(sp) % alignof(P) == 0);
-	auto promise = new (sp) P;
-
-	_cofiber_private::enter([=] (void *original_sp) {
-		_cofiber_private::stack.push_back({ state, original_sp });
-
-		try {
-			cofiber_await(promise->initial_suspend());
-			functor();
-			cofiber_await(promise->final_suspend());
-		}catch(_cofiber_private::destroy_exception &) {
-			// ignore the exception that is thrown by destroy()
-		}catch(...) {
-			std::terminate();
+				awaiter.await_suspend(cofiber::coroutine_handle<P>(state));
+			}, _cofiber_private::stack.back().caller_sp);
 		}
 
-		_cofiber_private::restore([&] (void *coroutine_sp) {
-			auto state = _cofiber_private::stack.back().state;
-			_cofiber_private::stack.pop_back();
+		return awaiter.await_resume();
+	}
 
-		}, _cofiber_private::stack.back().caller_sp);
-	}, sp);
+	template<typename X, typename T>
+	void do_return(T &&value) {
+		using P = typename cofiber::coroutine_traits<X>::promise_type;
 
-	return promise->get_return_object(cofiber::coroutine_handle<>(state));
-}
+		cofiber::coroutine_handle<P> handle(_cofiber_private::stack.back().state);
+		handle.promise().return_value(std::forward<T>(value));
+	}
+
+	template<typename X, typename F>
+	X do_routine(F functor) {
+		using P = typename cofiber::coroutine_traits<X>::promise_type;
+
+		size_t stack_size = 0x100000;
+		char *sp = (char *)(operator new(stack_size)) + stack_size;
+		
+		// allocate both the coroutine state and the promise on the fiber stack
+		sp -= sizeof(_cofiber_private::state_struct);
+		assert(uintptr_t(sp) % alignof(_cofiber_private::state_struct) == 0);
+		auto state = new (sp) _cofiber_private::state_struct;
+
+		sp -= sizeof(P);
+		assert(uintptr_t(sp) % alignof(P) == 0);
+		auto promise = new (sp) P;
+
+		_cofiber_private::enter([f = std::move(functor), state, promise] (void *original_sp) {
+			_cofiber_private::stack.push_back({ state, original_sp });
+
+			try {
+				await_expr<X>() | promise->initial_suspend();
+				f();
+				await_expr<X>() | promise->final_suspend();
+			}catch(_cofiber_private::destroy_exception &) {
+				// ignore the exception that is thrown by destroy()
+			}catch(...) {
+				std::terminate();
+			}
+
+			_cofiber_private::restore([state] (void *coroutine_sp) {
+				auto state = _cofiber_private::stack.back().state;
+				_cofiber_private::stack.pop_back();
+			}, _cofiber_private::stack.back().caller_sp);
+		}, sp);
+
+		return promise->get_return_object(cofiber::coroutine_handle<P>(state));
+	}
+} // namespace _cofiber_private
 
