@@ -7,12 +7,10 @@
 #include <new>
 #include <vector>
 
-#define COFIBER_ROUTINE(type, name_args, capture, code) \
+#define COFIBER_ROUTINE(type, name_args, functor) \
 	type name_args { \
 		using _cofiber_type = type; \
-		return ::_cofiber_private::do_routine<_cofiber_type>(capture () { \
-			code \
-		}); \
+		return ::_cofiber_private::do_routine<_cofiber_type>(functor); \
 	}
 
 #define COFIBER_AWAIT \

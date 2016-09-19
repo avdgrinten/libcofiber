@@ -3,7 +3,7 @@
 
 #include <cofiber.hpp>
 
-COFIBER_ROUTINE(cofiber::no_future, test(), [], {
+COFIBER_ROUTINE(cofiber::no_future, test(), [] () {
 	printf("Hello world\n");
 })
 
