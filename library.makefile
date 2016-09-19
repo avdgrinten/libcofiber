@@ -1,6 +1,6 @@
 
 OBJECTS = obj/trampoline.o
-TESTS = tests/main tests/future
+TESTS = tests/main tests/stash tests/future
 
 .PHONY: all
 all: bin/libcofiber.so
