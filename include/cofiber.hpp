@@ -189,6 +189,14 @@ namespace _cofiber_private {
 		return awaiter.await_resume();
 	}
 
+	template<typename X>
+	void do_return() {
+		using P = typename cofiber::coroutine_traits<X>::promise_type;
+
+		cofiber::coroutine_handle<P> handle(_cofiber_private::stack.back().state);
+		handle.promise().return_value();
+	}
+
 	template<typename X, typename T>
 	void do_return(T &&value) {
 		using P = typename cofiber::coroutine_traits<X>::promise_type;
@@ -196,7 +204,7 @@ namespace _cofiber_private {
 		cofiber::coroutine_handle<P> handle(_cofiber_private::stack.back().state);
 		handle.promise().return_value(std::forward<T>(value));
 	}
-
+	
 	template<typename X, typename F>
 	X do_routine(F functor) {
 		using P = typename cofiber::coroutine_traits<X>::promise_type;
