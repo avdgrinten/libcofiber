@@ -1,4 +1,7 @@
 
+#ifndef LIBCOFIBER_COFIBER_HPP
+#define LIBCOFIBER_COFIBER_HPP
+
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -67,7 +70,7 @@ namespace _cofiber_private {
 
 	struct destroy_exception { };
 
-	thread_local std::vector<activation_struct> stack;
+	extern thread_local std::vector<activation_struct> stack;
 } // namespace _cofiber_private
 
 namespace cofiber {
@@ -232,4 +235,6 @@ namespace _cofiber_private {
 		return promise->get_return_object(cofiber::coroutine_handle<P>(state));
 	}
 } // namespace _cofiber_private
+
+#endif // LIBCOFIBER_COFIBER_HPP
 
