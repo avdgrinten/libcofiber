@@ -19,6 +19,7 @@ install: bin/libcofiber.so
 	install bin/libcofiber.so $(DESTDIR)$(prefix)lib/
 	install --mode=0644 $S/include/cofiber.hpp $(DESTDIR)$(prefix)include/
 	install --mode=0644 $S/include/cofiber/stash.hpp $(DESTDIR)$(prefix)include/cofiber/
+	install --mode=0644 $S/include/cofiber/future.hpp $(DESTDIR)$(prefix)include/cofiber/
 
 obj bin tests:
 	mkdir -p $@

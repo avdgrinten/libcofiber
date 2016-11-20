@@ -1,4 +1,7 @@
 
+#ifndef LIBCOFIBER_COFIBER_FUTURE_HPP
+#define LIBCOFIBER_COFIBER_FUTURE_HPP
+
 #include <atomic>
 #include <functional>
 #include <queue>
@@ -216,4 +219,6 @@ struct coroutine_traits<future<T>> {
 };
 
 } // namespace cofiber
+
+#endif // LIBCOFIBER_COFIBER_FUTURE_HPP
 
