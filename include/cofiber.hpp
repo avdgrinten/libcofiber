@@ -5,9 +5,9 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include <utility>
+#include <future>
 #include <new>
+#include <utility>
 #include <vector>
 
 #define COFIBER_ROUTINE(type, name_args, functor) \
@@ -243,6 +243,32 @@ namespace _cofiber_private {
 		return promise->get_return_object(cofiber::coroutine_handle<P>(state));
 	}
 } // namespace _cofiber_private
+
+// ----------------------------------------------------------------------------
+// Support for std::future
+// ----------------------------------------------------------------------------
+
+namespace cofiber {
+	template<typename T>
+	struct coroutine_traits<std::future<T>> {
+		struct promise_type {
+			std::future<T> get_return_object(coroutine_handle<> handle) {
+				return _promise.get_future();
+			}
+
+			auto initial_suspend() { return suspend_never(); }
+			auto final_suspend() { return suspend_never(); }
+
+			template<typename... V>
+			void return_value(V &&... value) {
+				_promise.set_value(std::forward<V>(value)...);
+			}
+
+		private:
+			std::promise<T> _promise;
+		};
+	};
+}
 
 #endif // LIBCOFIBER_COFIBER_HPP
 
