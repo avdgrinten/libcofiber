@@ -173,7 +173,7 @@ namespace _cofiber_private {
 	decltype(cofiber_awaiter(std::declval<T>()).await_resume()) operator| (await_expr<X>, T &&expression) {
 		using P = typename cofiber::coroutine_traits<X>::promise_type;
 
-		decltype(auto) awaiter = cofiber_awaiter(std::forward<T>(expression));
+		auto &&awaiter = cofiber_awaiter(std::forward<T>(expression));
 
 		if(!awaiter.await_ready()) {
 			_cofiber_private::restore([&awaiter] (void *coroutine_sp) {
