@@ -210,7 +210,8 @@ namespace _cofiber_private {
 		using P = typename cofiber::coroutine_traits<X>::promise_type;
 
 		size_t stack_size = 0x100000;
-		char *sp = (char *)(operator new(stack_size)) + stack_size;
+		auto bottom = (char *)(operator new(stack_size));
+		auto sp = bottom + stack_size;
 		
 		// allocate both the coroutine state and the promise on the fiber stack
 		sp -= sizeof(_cofiber_private::state_struct);
@@ -220,8 +221,10 @@ namespace _cofiber_private {
 		sp -= sizeof(P);
 		assert(uintptr_t(sp) % alignof(P) == 0);
 		auto promise = new (sp) P;
+		
+		auto object = promise->get_return_object(cofiber::coroutine_handle<P>(state));
 
-		_cofiber_private::enter([f = std::move(functor), state, promise] (void *original_sp) {
+		_cofiber_private::enter([f = std::move(functor), bottom, state, promise] (void *original_sp) {
 			_cofiber_private::stack.push_back({ state, original_sp });
 
 			try {
@@ -234,13 +237,14 @@ namespace _cofiber_private {
 				std::terminate();
 			}
 
-			_cofiber_private::restore([state] (void *coroutine_sp) {
+			_cofiber_private::restore([bottom, state] (void *coroutine_sp) {
 				auto state = _cofiber_private::stack.back().state;
 				_cofiber_private::stack.pop_back();
+				operator delete(bottom);
 			}, _cofiber_private::stack.back().caller_sp);
 		}, sp);
 
-		return promise->get_return_object(cofiber::coroutine_handle<P>(state));
+		return std::move(object);
 	}
 } // namespace _cofiber_private
 
