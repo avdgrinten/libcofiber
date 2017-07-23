@@ -213,7 +213,7 @@ namespace _cofiber_private {
 		auto bottom = (char *)(operator new(stack_size));
 		auto sp = bottom + stack_size;
 		
-		// allocate both the coroutine state and the promise on the fiber stack
+		// Allocate both the coroutine state and the promise on the fiber stack.
 		sp -= sizeof(_cofiber_private::state_struct);
 		assert(uintptr_t(sp) % alignof(_cofiber_private::state_struct) == 0);
 		auto state = new (sp) _cofiber_private::state_struct;
@@ -221,7 +221,10 @@ namespace _cofiber_private {
 		sp -= sizeof(P);
 		assert(uintptr_t(sp) % alignof(P) == 0);
 		auto promise = new (sp) P;
-		
+
+		// Align the coroutine stack on a 16-byte boundary.
+		sp -= (uintptr_t)sp % 16;
+
 		auto object = promise->get_return_object(cofiber::coroutine_handle<P>(state));
 
 		_cofiber_private::enter([f = std::move(functor), bottom, state, promise] (void *original_sp) {
@@ -232,7 +235,7 @@ namespace _cofiber_private {
 				f();
 				await_expr<X>() | promise->final_suspend();
 			}catch(_cofiber_private::destroy_exception &) {
-				// ignore the exception that is thrown by destroy()
+				// Ignore the exception that is thrown by destroy().
 			}catch(...) {
 				std::terminate();
 			}

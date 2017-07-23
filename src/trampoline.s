@@ -4,7 +4,7 @@
 _cofiber_enter:
 	mov %rsi, %r11
 
-	# save the current state
+	# Save the current state.
 	push %rbx
 	push %rbp
 	push %r12
@@ -13,9 +13,9 @@ _cofiber_enter:
 	push %r15
 	mov %rsp, %rsi
 
-	# call the actual coroutine
+	# Call the actual coroutine.
+	# Note that the stack has to be properly aligned before we do this call.
 	mov %rdx, %rsp
-
 	call *%r11
 	ud2
 
