@@ -227,7 +227,7 @@ namespace _cofiber_private {
 
 		auto object = promise->get_return_object(cofiber::coroutine_handle<P>(state));
 
-		_cofiber_private::enter([f = std::move(functor), bottom, state, promise] (void *original_sp) {
+		_cofiber_private::enter([f = std::move(functor), bottom, state, promise] (void *original_sp) mutable {
 			_cofiber_private::stack.push_back({ state, original_sp });
 
 			try {
