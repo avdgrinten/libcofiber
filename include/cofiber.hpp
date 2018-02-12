@@ -161,6 +161,8 @@ namespace cofiber {
 
 			auto initial_suspend() { return suspend_never(); }
 			auto final_suspend() { return suspend_never(); }
+
+			void return_value() { }
 		};
 	};
 } // namespace cofiber
