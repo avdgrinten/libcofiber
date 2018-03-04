@@ -242,6 +242,9 @@ namespace _cofiber_private {
 				std::terminate();
 			}
 
+			// Destruct the functor here as we never properly unwind this stack. 
+			f.~F();
+
 			_cofiber_private::restore([bottom, state] (void *coroutine_sp) {
 				auto state = _cofiber_private::stack.back().state;
 				_cofiber_private::stack.pop_back();
