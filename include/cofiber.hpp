@@ -19,6 +19,9 @@
 #define COFIBER_AWAIT \
 	::_cofiber_private::await_expr<_cofiber_type>() |
 
+#define COFIBER_YIELD \
+	::_cofiber_private::yield_expr<_cofiber_type>() |
+
 #define COFIBER_RETURN(value) \
 	do { \
 		::_cofiber_private::do_return<_cofiber_type>(value); \
@@ -168,14 +171,11 @@ namespace cofiber {
 } // namespace cofiber
 
 namespace _cofiber_private {
-	template<typename X>
-	struct await_expr { };
-
-	template<typename X, typename T>
-	decltype(cofiber_awaiter(std::declval<T>()).await_resume()) operator| (await_expr<X>, T &&expression) {
+	// Helper function for await. We need to take the awaiter as argument
+	// so that we can extends its lifetime if it is a reference.
+	template<typename X, typename Awaiter>
+	auto do_await(Awaiter &&awaiter) {
 		using P = typename cofiber::coroutine_traits<X>::promise_type;
-
-		auto &&awaiter = cofiber_awaiter(std::forward<T>(expression));
 
 		if(!awaiter.await_ready()) {
 			_cofiber_private::restore([&awaiter] (void *coroutine_sp) {
@@ -189,6 +189,28 @@ namespace _cofiber_private {
 		}
 
 		return awaiter.await_resume();
+	}
+
+	template<typename X>
+	struct await_expr { };
+
+	template<typename X, typename T>
+	decltype(cofiber_awaiter(std::declval<T>()).await_resume())
+	operator| (await_expr<X>, T &&expression) {
+		using P = typename cofiber::coroutine_traits<X>::promise_type;
+
+		return do_await<X>(cofiber_awaiter(std::forward<T>(expression)));
+	}
+	
+	template<typename X>
+	struct yield_expr { };
+
+	template<typename X, typename T>
+	auto operator| (yield_expr<X>, T &&expr) {
+		using P = typename cofiber::coroutine_traits<X>::promise_type;
+
+		cofiber::coroutine_handle<P> handle(_cofiber_private::stack.back().state);
+		return do_await<X>(cofiber_awaiter(handle.promise().yield_value(std::forward<T>(expr))));
 	}
 
 	template<typename X>
@@ -244,6 +266,7 @@ namespace _cofiber_private {
 
 			// Destruct the functor here as we never properly unwind this stack. 
 			f.~F();
+			promise->~P();
 
 			_cofiber_private::restore([bottom, state] (void *coroutine_sp) {
 				auto state = _cofiber_private::stack.back().state;
