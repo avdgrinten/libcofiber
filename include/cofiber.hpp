@@ -5,15 +5,17 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <iostream>
 #include <future>
 #include <new>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #define COFIBER_ROUTINE(type, name_args, functor) \
 	type name_args { \
 		using _cofiber_type = type; \
-		return ::_cofiber_private::do_routine<_cofiber_type>(functor); \
+		return ::_cofiber_private::do_routine<_cofiber_type>(nullptr, functor); \
 	}
 
 #define COFIBER_AWAIT \
@@ -58,9 +60,10 @@ namespace _cofiber_private {
 
 	struct state_struct {
 		state_struct()
-		: suspended_sp(nullptr) { }
+		: suspended_sp(nullptr), destroyed{false} { }
 
 		void *suspended_sp;
+		bool destroyed;
 	};
 
 	struct activation_struct {
@@ -73,7 +76,9 @@ namespace _cofiber_private {
 
 	struct destroy_exception { };
 
+	extern thread_local std::vector<char *> alloc_cache;
 	extern thread_local std::vector<activation_struct> stack;
+	extern thread_local std::unordered_map<const char *, uint64_t> leaks;
 } // namespace _cofiber_private
 
 namespace cofiber {
@@ -110,8 +115,8 @@ namespace cofiber {
 		void destroy() const {
 			_cofiber_private::restore([this] (void *caller_sp) {
 				_cofiber_private::stack.push_back({ _state, caller_sp });
-
-				throw _cofiber_private::destroy_exception();
+				assert(!_state->destroyed);
+				_state->destroyed = true;
 			}, _state->suspended_sp);
 		}
 
@@ -188,6 +193,34 @@ namespace _cofiber_private {
 			}, _cofiber_private::stack.back().caller_sp);
 		}
 
+		auto state = _cofiber_private::stack.back().state;
+		if(state->destroyed) {
+			std::cerr << "libcofiber: destory_exception was required" << std::endl;
+			throw _cofiber_private::destroy_exception();
+		}
+
+		return awaiter.await_resume();
+	}
+
+	template<typename X, typename Awaiter>
+	void do_final_await(Awaiter &&awaiter) {
+		using P = typename cofiber::coroutine_traits<X>::promise_type;
+
+		if(!awaiter.await_ready()) {
+			_cofiber_private::restore([&awaiter] (void *coroutine_sp) {
+				auto state = _cofiber_private::stack.back().state;
+				_cofiber_private::stack.pop_back();
+
+				state->suspended_sp = coroutine_sp;
+
+				awaiter.await_suspend(cofiber::coroutine_handle<P>(state));
+			}, _cofiber_private::stack.back().caller_sp);
+		}
+
+		auto state = _cofiber_private::stack.back().state;
+		if(state->destroyed)
+			return;
+
 		return awaiter.await_resume();
 	}
 
@@ -230,11 +263,21 @@ namespace _cofiber_private {
 	}
 	
 	template<typename X, typename F>
-	X do_routine(F functor) {
+	X do_routine(const char *token, F functor) {
 		using P = typename cofiber::coroutine_traits<X>::promise_type;
 
+//		if(leaks[token]++ > 100)
+//			std::cerr << "libcofiber: Unusually high number of concurrent active coroutines in "
+//					<< token << std::endl;
+
 		size_t stack_size = 0x100000;
-		auto bottom = (char *)(operator new(stack_size));
+		char *bottom;
+		if(!alloc_cache.empty()) {
+			bottom = alloc_cache.back();
+			alloc_cache.pop_back();
+		}else{
+			bottom = (char *)(operator new(stack_size));
+		}
 		auto sp = bottom + stack_size;
 		
 		// Allocate both the coroutine state and the promise on the fiber stack.
@@ -251,13 +294,14 @@ namespace _cofiber_private {
 
 		auto object = promise->get_return_object(cofiber::coroutine_handle<P>(state));
 
-		_cofiber_private::enter([f = std::move(functor), bottom, state, promise] (void *original_sp) mutable {
+		_cofiber_private::enter([token, f = std::move(functor), bottom, state, promise]
+				(void *original_sp) mutable {
 			_cofiber_private::stack.push_back({ state, original_sp });
 
 			try {
-				await_expr<X>() | promise->initial_suspend();
+				do_await<X>(cofiber_awaiter(promise->initial_suspend()));
 				f();
-				await_expr<X>() | promise->final_suspend();
+				do_final_await<X>(cofiber_awaiter(promise->final_suspend()));
 			}catch(_cofiber_private::destroy_exception &) {
 				// Ignore the exception that is thrown by destroy().
 			}catch(...) {
@@ -268,10 +312,12 @@ namespace _cofiber_private {
 			f.~F();
 			promise->~P();
 
-			_cofiber_private::restore([bottom, state] (void *coroutine_sp) {
+			_cofiber_private::restore([token, bottom, state] (void *coroutine_sp) {
 				auto state = _cofiber_private::stack.back().state;
 				_cofiber_private::stack.pop_back();
-				operator delete(bottom);
+				// TODO: Also make use of: operator delete(bottom);
+				alloc_cache.push_back(bottom);
+				//leaks[token]--;
 			}, _cofiber_private::stack.back().caller_sp);
 		}, sp);
 
