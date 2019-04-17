@@ -195,8 +195,8 @@ namespace _cofiber_private {
 
 		auto state = _cofiber_private::stack.back().state;
 		if(state->destroyed) {
-			std::cerr << "libcofiber: destory_exception was required" << std::endl;
-			throw _cofiber_private::destroy_exception();
+			//std::cerr << "libcofiber: destroy_exception was required" << std::endl;
+			throw _cofiber_private::destroy_exception{};
 		}
 
 		return awaiter.await_resume();
